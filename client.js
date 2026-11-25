@@ -34,6 +34,23 @@ window.__ModuleLoader__.load({
       '.vb-tab:hover{color:var(--dsw-alias-label-primary)}',
       '.vb-tab[data-on="1"]{color:var(--dsw-alias-brand-primary);border-bottom-color:var(--dsw-alias-brand-primary);font-weight:600}',
       '.vb-body{flex:1;min-height:0;overflow:auto;padding:14px 18px 24px}',
+      '.vb-map{margin-bottom:14px}',
+      '.vb-map-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}',
+      '.vb-map-crumb{display:flex;align-items:center;gap:6px;min-width:0}',
+      '.vb-map-crumb-sep{color:var(--dsw-alias-label-tertiary)}',
+      '.vb-map-crumb-cur{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}',
+      '.vb-map-actions{display:flex;gap:4px}',
+      '.vb-map-svg{width:100%;height:auto;max-height:560px;display:block;background:radial-gradient(circle at 50% 46%,#111b26 0%,var(--dsw-alias-bg-base) 62%);border-radius:10px}',
+      '.vb-map-arc{transition:opacity .12s ease,filter .12s ease}',
+      '.vb-map-arc:hover{opacity:1;filter:brightness(1.22)}',
+      '.vb-map-legend{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}',
+      '.vb-map-legend-item{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-bg-layer-1);color:inherit;border-radius:999px;padding:3px 9px;font:inherit;font-size:11px;cursor:pointer}',
+      '.vb-map-legend-item:hover{background:var(--dsw-alias-interactive-bg-hover)}',
+      '.vb-map-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}',
+      '.vb-map-count{color:var(--dsw-alias-label-tertiary);font-size:10.5px}',
+      '.vb-map-relations{margin-top:10px;border-top:1px solid var(--dsw-alias-border-l1);padding-top:8px}',
+      '.vb-map-rel-title{font-size:11px;color:var(--dsw-alias-label-tertiary);margin-bottom:4px}',
+      '.vb-map-rel{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:2px 0}',
       '.vb-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin-bottom:14px}',
       '.vb-card{border:1px solid var(--dsw-alias-border-l1);border-radius:9px;background:var(--dsw-alias-bg-layer-1);padding:9px 11px;border-left:3px solid var(--dsw-alias-border-l2)}',
       '.vb-card[data-tone="danger"]{border-left-color:var(--dsw-alias-state-error-primary)}',
@@ -155,10 +172,168 @@ window.__ModuleLoader__.load({
         h('span', { className: 'vb-bar-value' }, String(row.count)))))
     }
 
-    function Overview({ scan }) {
+
+    const MAP_PALETTE = ['#4f8cff', '#ff7a59', '#2fd6a3', '#ffd166', '#c792ea', '#56d4dd', '#f06292',
+      '#9ccc65', '#ffb74d', '#7e8bff', '#26c6da', '#d4a017', '#8d6e63']
+
+    function bandPath(cx, cy, r0, r1, a0, a1) {
+      const large = a1 - a0 > Math.PI ? 1 : 0
+      const x0 = cx + r0 * Math.cos(a0), y0 = cy + r0 * Math.sin(a0)
+      const x1 = cx + r0 * Math.cos(a1), y1 = cy + r0 * Math.sin(a1)
+      const x2 = cx + r1 * Math.cos(a1), y2 = cy + r1 * Math.sin(a1)
+      const x3 = cx + r1 * Math.cos(a0), y3 = cy + r1 * Math.sin(a0)
+      return 'M ' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' A ' + r0 + ' ' + r0 + ' 0 ' + large + ' 1 ' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
+        ' L ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' A ' + r1 + ' ' + r1 + ' 0 ' + large + ' 0 ' + x3.toFixed(1) + ' ' + y3.toFixed(1) + ' Z'
+    }
+
+    function layoutNodes(nodes) {
+      const total = nodes.reduce((s, n) => s + n.count, 0) || 1
+      let cur = -Math.PI / 2
+      return nodes.map((n) => {
+        const share = n.count / total
+        const pad = Math.min(0.028, share * 0.22)
+        const a0 = cur + pad / 2
+        const a1 = Math.max(a0 + 0.012, cur + share * 2 * Math.PI - pad / 2)
+        const item = { ...n, a0, a1, mid: (a0 + a1) / 2 }
+        cur += share * 2 * Math.PI
+        return item
+      })
+    }
+
+    function VaultMap({ map }) {
+      const [mode, setMode] = useState('radial')
+      const [focus, setFocus] = useState('')
+
+      if (!map) return h('div', { className: 'vb-empty' }, '正在计算目录地图…')
+
+      const tops = map.dirs.filter((d) => d.depth === 1)
+      const colorOf = (path) => {
+        const top = path.split('/')[0]
+        const i = tops.findIndex((t) => t.path === top)
+        return MAP_PALETTE[(i < 0 ? 0 : i) % MAP_PALETTE.length]
+      }
+      const focusDir = focus ? map.dirs.find((d) => d.path === focus) : null
+      const subs = focus ? map.dirs.filter((d) => d.parent === focus && d.depth === 2) : []
+      const directCount = focusDir ? Math.max(0, focusDir.count - subs.reduce((s, d) => s + d.count, 0)) : 0
+
+      const baseNodes = focus
+        ? [
+            ...subs.map((d, i) => ({ id: d.path, label: d.name, count: d.count, color: colorOf(d.path), fillOpacity: 0.55 + 0.42 * (subs.length <= 1 ? 1 : i / (subs.length - 1)), canOpen: false })),
+            ...(directCount > 0 ? [{ id: focus + '/(直属)', label: '(直属笔记)', count: directCount, color: '#2a3646', canOpen: false }] : []),
+          ]
+        : tops.map((d) => ({ id: d.path, label: d.name, count: d.count, color: colorOf(d.path), canOpen: true }))
+
+      const laid = layoutNodes(baseNodes)
+      const nodeById = new Map(laid.map((n) => [n.id, n]))
+
+      const edges = focus
+        ? (map.inner[focus] || []).map((e) => {
+            const a = subs.some((s) => s.path === e.a) ? e.a : focus + '/(直属)'
+            const b = subs.some((s) => s.path === e.b) ? e.b : focus + '/(直属)'
+            return { a, b, n: e.n }
+          }).filter((e) => e.a !== e.b)
+        : map.edges.map((e) => ({ a: e.a, b: e.b, n: e.n }))
+
+      const maxN = Math.max(1, ...edges.map((e) => e.n))
+      const cx = 500, cy = 340
+      const outer = focus ? 250 : 250
+      const r0 = outer - 26, r1 = outer
+
+      const svgParts = []
+      svgParts.push('M0 0')
+
+      // 弦
+      for (const e of edges) {
+        const na = nodeById.get(e.a)
+        const nb = nodeById.get(e.b)
+        if (!na || !nb) continue
+        const x0 = cx + (r0 - 6) * Math.cos(na.mid)
+        const y0 = cy + (r0 - 6) * Math.sin(na.mid)
+        const x1 = cx + (r0 - 6) * Math.cos(nb.mid)
+        const y1 = cy + (r0 - 6) * Math.sin(nb.mid)
+        const w = 0.7 + 7.5 * Math.sqrt(e.n / maxN)
+        svgParts.push(h('path', {
+          key: e.a + '|' + e.b,
+          d: 'M ' + x0.toFixed(1) + ' ' + y0.toFixed(1) + ' Q ' + cx + ' ' + cy + ' ' + x1.toFixed(1) + ' ' + y1.toFixed(1),
+          fill: 'none',
+          stroke: '#42586f',
+          strokeWidth: w,
+          opacity: 0.32,
+        }))
+      }
+
+      // 弧带
+      for (const n of laid) {
+        svgParts.push(h('path', {
+          key: 'arc-' + n.id,
+          d: bandPath(cx, cy, r0, r1, n.a0, n.a1),
+          fill: n.color,
+          fillOpacity: n.fillOpacity == null ? 0.95 : n.fillOpacity,
+          opacity: 1,
+          className: 'vb-map-arc',
+          style: { cursor: n.canOpen || focus ? 'pointer' : 'default' },
+          onClick: () => {
+            if (mode === 'radial' && !focus && n.canOpen) setFocus(n.id)
+            else if (focus) setFocus('')
+          },
+        }))
+        const showLabel = focus ? n.count >= 4 : n.count >= 10
+        if (showLabel) {
+          const tx = cx + (r1 + 14) * Math.cos(n.mid)
+          const ty = cy + (r1 + 14) * Math.sin(n.mid)
+          let anchor = 'middle'
+          if (Math.cos(n.mid) > 0.3) anchor = 'start'
+          else if (Math.cos(n.mid) < -0.3) anchor = 'end'
+          svgParts.push(h('text', {
+            key: 't-' + n.id, x: tx.toFixed(0), y: ty.toFixed(0), textAnchor: anchor,
+            fill: '#dbe4ee', fontSize: 11.5, fontFamily: 'Noto Sans CJK SC,sans-serif',
+            style: { pointerEvents: 'none' },
+          }, n.label + (focus ? ' ' + n.count : '')))
+        }
+      }
+
+      // 中心
+      svgParts.push(h('circle', { key: 'core', cx, cy, r: focus ? 86 : 92, fill: '#101924', stroke: '#223040', strokeWidth: 1.2, style: { cursor: focus ? 'pointer' : 'default' }, onClick: () => setFocus('') }))
+      svgParts.push(h('text', { key: 'core1', x: cx, y: cy - 8, textAnchor: 'middle', fill: '#7d8aa0', fontSize: 12.5, fontFamily: 'Noto Sans CJK SC,sans-serif', style: { pointerEvents: 'none' } }, focus ? '当前目录' : '全库'))
+      svgParts.push(h('text', { key: 'core2', x: cx, y: cy + 18, textAnchor: 'middle', fill: '#dbe4ee', fontSize: focus ? 15 : 22, fontWeight: 700, fontFamily: 'Noto Sans CJK SC,sans-serif', style: { pointerEvents: 'none' } }, focus ? focusDir.name : String(map.total)))
+      if (focus) svgParts.push(h('text', { key: 'core3', x: cx, y: cy + 40, textAnchor: 'middle', fill: '#7d8aa0', fontSize: 11, fontFamily: 'Noto Sans CJK SC,sans-serif', style: { pointerEvents: 'none' } }, focusDir.count + ' 篇 · 点中心返回'))
+
+      const list = focus
+        ? (map.edges.filter((e) => e.a === focus || e.b === focus).slice(0, 6))
+        : map.edges.slice(0, 6)
+
+      return h('div', { className: 'vb-map' },
+        h('div', { className: 'vb-map-bar' },
+          h('div', { className: 'vb-map-crumb' },
+            h('button', { className: 'vb-btn', 'data-kind': 'ghost', onClick: () => setFocus('') }, '全库'),
+            focus ? h('span', { className: 'vb-map-crumb-sep' }, '›') : null,
+            focus ? h('span', { className: 'vb-map-crumb-cur' }, focus) : null),
+          h('div', { className: 'vb-map-actions' },
+            h('button', { className: 'vb-btn', 'data-kind': mode === 'radial' ? 'primary' : '', onClick: () => setMode('radial') }, '放射'),
+            h('button', { className: 'vb-btn', 'data-kind': mode === 'chord' ? 'primary' : '', onClick: () => setMode('chord') }, '弦图'))),
+        h('svg', { viewBox: '0 0 1000 680', className: 'vb-map-svg' }, svgParts),
+        h('div', { className: 'vb-map-legend' },
+          (focus ? subs.map((d) => ({ path: d.path, label: d.name, count: d.count })) : tops.map((d) => ({ path: d.path, label: d.name, count: d.count }))).map((d) =>
+            h('button', {
+              key: d.path,
+              className: 'vb-map-legend-item',
+              onClick: () => { if (!focus) setFocus(d.path) },
+            },
+              h('span', { className: 'vb-map-dot', style: { background: colorOf(d.path) } }),
+              h('span', null, d.label),
+              h('span', { className: 'vb-map-count' }, String(d.count))))),
+        h('div', { className: 'vb-map-relations' },
+          h('div', { className: 'vb-map-rel-title' }, focus ? '与其他目录的引用' : '最密的目录关系'),
+          list.map((e) => h('div', { key: e.a + e.b, className: 'vb-map-rel' },
+            h('span', null, (e.a === focus ? e.a : e.a) + ' ↔ ' + e.b),
+            h('span', { className: 'vb-map-count' }, e.n + ' 次')))))
+    }
+
+    function Overview({ scan, map }) {
       if (!scan) return h('div', { className: 'vb-empty' }, '正在扫描…')
       const c = scan.counts || {}
       return h('div', null,
+        h(VaultMap, { map }),
         h('div', { className: 'vb-cards' },
           h(Stat, { label: '笔记', value: scan.totalFiles }),
           h(Stat, { label: '总大小', value: fmtBytes(scan.totalBytes) }),
@@ -338,6 +513,7 @@ window.__ModuleLoader__.load({
 
     function App() {
       const [scan, setScan] = useState(null)
+      const [map, setMap] = useState(null)
       const [tab, setTab] = useState('overview')
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState('')
@@ -346,8 +522,9 @@ window.__ModuleLoader__.load({
       const rescan = useCallback(async () => {
         setBusy(true); setError('')
         try {
-          const data = await getJSON('/scan')
+          const [data, m] = await Promise.all([getJSON('/scan'), getJSON('/map')])
           setScan(data)
+          setMap(m)
         } catch (e) {
           setError(e.message)
         } finally { setBusy(false) }
@@ -365,7 +542,7 @@ window.__ModuleLoader__.load({
         : (error ? '扫描失败：' + error : '正在扫描…')
 
       const body =
-        tab === 'overview' ? h(Overview, { scan }) :
+        tab === 'overview' ? h(Overview, { scan, map }) :
         tab === 'health' ? h(Health, { scan, onOpen: openFile }) :
         tab === 'files' ? h(Files, { scan, openPath, onConsumed: () => setOpenPath('') }) :
         h(Move, { scan, onMoved: rescan })
