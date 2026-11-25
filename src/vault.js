@@ -79,7 +79,11 @@ export function extractMdLinks(text) {
   const out = []
   const re = /\[[^\]]*\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g
   let m
-  while ((m = re.exec(clean))) out.push(decodeURIComponent(m[1]))
+  while ((m = re.exec(clean))) {
+    const target = decodeURIComponent(m[1])
+    if (/^(https?:)?\/\//i.test(target) || target.startsWith('mailto:')) continue
+    out.push(target)
+  }
   return out
 }
 
