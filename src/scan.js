@@ -1,5 +1,5 @@
 // 扫描：遍历 md、解析链接与 frontmatter、算体检指标。
-import { readdir, stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { parseFrontmatter, extractLinks, extractMdLinks, toPosix } from './vault.js'
 
@@ -243,5 +243,118 @@ export async function scanVault(settings) {
     byType: [...byType].map(([type, count]) => ({ type, count })).sort((a, b) => b.count - a.count),
     byTag: [...byTag].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count),
     recent: sorted.slice(0, 20).map((d) => ({ path: d.path, mtime: d.mtime })),
+  }
+}
+
+/** 目录地图：给总览的放射图/弦图提供节点与目录间链接。只统计到二级。 */
+export async function buildMap(settings) {
+  const root = settings.vaultPath
+  const found = []
+  await walk(root, root, found, ['.git', '.obsidian', 'node_modules'])
+  const excluded = settings.excludeFolders.filter(Boolean)
+  const docs = found.filter((f) => !excluded.some((p) => under(f.rel, p)))
+
+  const dirStat = new Map()
+  const ensureDir = (path) => {
+    let node = dirStat.get(path)
+    if (node) return node
+    const parts = path.split('/')
+    node = {
+      path,
+      name: parts[parts.length - 1],
+      parent: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
+      depth: parts.length,
+      count: 0,
+      bytes: 0,
+    }
+    dirStat.set(path, node)
+    return node
+  }
+
+  const byName = new Map()
+  for (const f of found) {
+    const name = basename(f.rel).replace(/\.md$/, '')
+    if (!byName.has(name)) byName.set(name, [])
+    byName.get(name).push(f.rel)
+  }
+
+  const docSet = new Set(docs.map((d) => d.rel))
+  const edgeTop = new Map()
+  const innerEdges = new Map()
+  let linkTotal = 0
+  let crossTotal = 0
+
+  for (const file of docs) {
+    const text = await readFile(file.abs, 'utf8')
+    const info = await stat(file.abs)
+    const parts = file.rel.split('/')
+    parts.pop()
+    let acc = ''
+    for (const part of parts) {
+      acc = acc ? acc + '/' + part : part
+      const node = ensureDir(acc)
+      node.count += 1
+      node.bytes += info.size
+    }
+    const srcParts = file.rel.split('/')
+    const sTop = srcParts.length > 1 ? srcParts[0] : '__root__'
+    const sSecond = srcParts.length > 2 ? srcParts[0] + '/' + srcParts[1] : sTop
+
+    for (const link of extractLinks(text)) {
+      const target = link.target.replace(/\.md$/, '')
+      let hit = null
+      if (target.includes('/')) {
+        const guess = target.replace(/^\/+/, '')
+        hit = docSet.has(guess) ? guess : (docSet.has(guess + '.md') ? guess + '.md' : null)
+        if (!hit) {
+          const tail = guess.split('/').pop()
+          const cands = byName.get(tail) || []
+          hit = cands.length === 1 ? cands[0] : null
+        }
+      } else {
+        const cands = byName.get(target) || []
+        hit = cands.length === 1 ? cands[0] : null
+      }
+      if (!hit) continue
+      linkTotal += 1
+      const tParts = hit.split('/')
+      const tTop = tParts.length > 1 ? tParts[0] : '__root__'
+      const tSecond = tParts.length > 2 ? tParts[0] + '/' + tParts[1] : tTop
+      if (sTop === tTop) {
+        if (sSecond !== tSecond && sTop !== '__root__') {
+          const k = sSecond + '|' + tSecond
+          innerEdges.set(k, (innerEdges.get(k) || 0) + 1)
+        }
+        continue
+      }
+      crossTotal += 1
+      const key = sTop < tTop ? sTop + '|' + tTop : tTop + '|' + sTop
+      edgeTop.set(key, (edgeTop.get(key) || 0) + 1)
+    }
+  }
+
+  const edges = []
+  for (const [key, n] of edgeTop) {
+    const [a, b] = key.split('|')
+    if (a === '__root__' || b === '__root__') continue
+    edges.push({ a, b, n })
+  }
+  edges.sort((x, y) => y.n - x.n)
+
+  const inner = {}
+  for (const [key, n] of innerEdges) {
+    const [a, b] = key.split('|')
+    if (!inner[a]) inner[a] = []
+    inner[a].push({ a, b, n })
+  }
+
+  return {
+    total: docs.length,
+    totalBytes: [...dirStat.values()].filter((d) => d.depth === 1).reduce((s, d) => s + d.bytes, 0),
+    links: linkTotal,
+    crossLinks: crossTotal,
+    dirs: [...dirStat.values()].sort((a, b) => b.count - a.count),
+    edges,
+    inner,
   }
 }

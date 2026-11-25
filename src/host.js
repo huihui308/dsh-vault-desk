@@ -140,6 +140,11 @@ async function route(ctx, req, res) {
     const scan = await scanVault(settings)
     return json(res, 200, scan)
   }
+  if (req.method === 'GET' && path === '/map') {
+    const { buildMap } = await import('./scan.js')
+    const map = await buildMap(settings)
+    return json(res, 200, map)
+  }
   if (req.method === 'GET' && path === '/folders') {
     return json(res, 200, { folders: await listFolders(root, settings) })
   }
