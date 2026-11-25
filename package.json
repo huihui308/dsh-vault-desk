@@ -1,26 +1,40 @@
 {
-  "name": "vault-blueprint",
-  "version": "0.1.0",
-  "description": "全库结构总览、体检、浏览编辑与文件移动的一体化控制台（Obsidian 插件）",
-  "main": "main.js",
-  "scripts": {
-    "dev": "node esbuild.config.mjs",
-    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production"
+  "name": "dsh-vault-desk",
+  "version": "0.2.0",
+  "private": true,
+  "description": "库工作台：全库结构总览、体检、文件浏览/编辑与移动的 DSH 面板。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
   },
-  "keywords": [
-    "obsidian",
-    "vault",
-    "lint",
-    "structure"
+  "files": [
+    "index.js",
+    "client.js",
+    "src",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
   ],
-  "author": "huihui308",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/node": "^22.10.2",
-    "builtin-modules": "^4.0.0",
-    "esbuild": "^0.24.0",
-    "obsidian": "latest",
-    "tslib": "^2.8.1",
-    "typescript": "^5.7.2"
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

@@ -1,0 +1,5 @@
+# dsh-vault-desk bundle patch：同一个包提供 host 半片（/vault-desk 接口与扫描）
+# 与浏览器半片（库工作台页面）。
+- insert:
+    - id: vault-desk
+      name: 'dsh-vault-desk'
