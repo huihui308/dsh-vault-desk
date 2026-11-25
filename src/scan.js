@@ -5,7 +5,7 @@ import { parseFrontmatter, extractLinks, extractMdLinks, toPosix } from './vault
 
 export const DEFAULT_SETTINGS = {
   vaultPath: '/mnt/sdb1/agent/david-wiki',
-  excludeFolders: ['.git', '.obsidian', '.claude', '.dsh', '.agents', '.deja', 'node_modules', 'raw', '99-附件'],
+  excludeFolders: ['.git', '.obsidian', '.claude', '.dsh', '.agents', '.deja', 'node_modules', 'raw', '99-附件', '05-david/03-ai-engineering/claude-code-prompts-repo'],
   rawFolders: ['Clippings', 'templates', '99-附件'],
   knownTopics: [
     'signal-control', 'signal-timing', 'intersection-optimization', 'communication-protocol',
@@ -16,12 +16,26 @@ export const DEFAULT_SETTINGS = {
     'knowledge-management', 'short-video', 'family-health', 'pbc', 'career-strategy',
     'interview', 'beer-control', 'rknn', 'rk3588', 'deepstream', 'embedded', 'edge-ai',
     'vlm', 'computer-vision',
+    'system-config', 'model-deployment', 'sglang', 'evaluation', 'ops', 'local-deployment',
+    'multi-tenant', 'langgraph', 'token-efficiency', 'deployment', 'productivity', 'learning-path',
+    'llm-inference', 'llm', 'web', 'edge-computing', 'transit-priority', 'adaptive-control',
+    'intersection', 'inference-optimization', 'job-market', 'career', 'family-education',
+    'security', 'memory', 'wsl', 'yolo', 'claude', 'skills', 'agent-skills', 'text-to-image',
+    'video-generation', 'comfyui', 'digital-twin', '3d-detection', 'openai', 'api-keys',
   ],
   largeFileKB: 200,
   staleInboxDays: 14,
 }
 
 const under = (path, prefix) => path === prefix || path.startsWith(prefix + '/')
+
+/** 作品工程目录里的过程文件（BENCHMARKS/HANDOFF/writing-pack 等），不是知识笔记，不参与体检。 */
+function isProcessFile(rel) {
+  const parts = rel.split('/')
+  if (parts.some((p) => p === 'writing-pack' || p === 'hf-video' || p === 'audio')) return true
+  const base = parts[parts.length - 1]
+  return /^[A-Z][A-Z0-9_-]{2,}\.md$/.test(base)
+}
 
 /** 同名文件时按 Obsidian 的常识挑一个：同目录优先，其次层级最浅。 */
 function pickCandidate(cands, sourcePath) {
@@ -69,6 +83,7 @@ export async function scanVault(settings) {
   const docs = []
   for (const file of found) {
     if (excluded.some((prefix) => under(file.rel, prefix))) continue
+    if (isProcessFile(file.rel)) continue
     try {
       const info = await stat(file.abs)
       const raw = await import('node:fs/promises').then((fs) => fs.readFile(file.abs, 'utf8'))
@@ -152,7 +167,9 @@ export async function scanVault(settings) {
     if (!type) add('missing-type', 'warn', doc.path, 'frontmatter 缺 type')
     if (!doc.tags.length) add('missing-tags', 'warn', doc.path, 'frontmatter 缺 tags')
     if (!doc.frontmatter.description && !doc.frontmatter.summary) {
-      add('missing-description', 'warn', doc.path, 'frontmatter 缺 description（检索摘要层）')
+      if (type === 'reference' || type === 'moc') {
+        add('missing-description', 'warn', doc.path, 'frontmatter 缺 description（检索摘要层）')
+      }
     }
     for (const tag of doc.tags) {
       if (!tag.startsWith('topic/')) continue
